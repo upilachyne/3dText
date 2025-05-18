@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG to 3D - Text Input</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: ARIAL, sans-serif; }
+        #container { width: 100vw; height: 100vh; display: block; }
+        #controlsPanel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.65);
+            color: white;
+            border-radius: 5px;
+            z-index: 100;
+            max-width: 320px; 
+        }
+        label { margin-right: 5px; display: inline-block; min-width: 100px; font-size: 0.9em;}
+        input[type="number"] { width: 60px; margin-right: 10px; margin-bottom: 5px; padding: 3px;}
+        input[type="file"] { margin-bottom: 10px; width: calc(100% - 110px); } 
+        select { width: calc(100% - 110px); padding: 4px; margin-bottom: 5px; background-color: #333; color: white; border: 1px solid #555; border-radius: 3px;}
+        .input-group { margin-bottom: 8px; display: flex; align-items: center;}
+        .input-group label { flex-shrink: 0; }
+        .input-group input[type="file"], .input-group select { flex-grow: 1; }
+        button { padding: 6px 12px; font-size: 0.9em; margin-top: 5px; cursor: pointer; background-color: #007bff; color:white; border:none; border-radius: 3px;}
+        button:hover { background-color: #0056b3; }
+        hr { border-color: #555; margin: 12px 0;}
+        h4 { margin-top: 0; margin-bottom: 8px; border-bottom: 1px solid #555; padding-bottom: 4px;}
+
+        #textInputContainer {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background-color: rgba(20,20,20,0.75);
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        #customText {
+            padding: 12px 15px;
+            font-size: 18px;
+            margin-right: 10px;
+            border: 1px solid #007bff;
+            background-color: #1a1a1a;
+            color: white;
+            border-radius: 5px;
+            min-width: 250px;
+        }
+        #customText::placeholder {
+            color: #888;
+        }
+        #generateTextButton {
+            padding: 12px 20px;
+            font-size: 18px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #generateTextButton:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controlsPanel">
+        <h4>Font Source</h4>
+        <div class="input-group">
+            <label for="svgFontSelect">Select Font:</label>
+            <select id="svgFontSelect"></select>
+        </div>
+        <div class="input-group">
+            <label for="svgFile">Or Import:</label>
+            <input type="file" id="svgFile" accept=".svg">
+        </div>
+        <hr>
+        <h4>Extrude Settings</h4>
+        <div class="input-group">
+            <label for="extrudeDepth">Extrude Depth:</label>
+            <input type="number" id="extrudeDepth" value="10" min="1" step="1">
+        </div>
+        <div class="input-group">
+            <label for="bevelThickness">Bevel Thick:</label>
+            <input type="number" id="bevelThickness" value="1" min="0" step="0.1">
+        </div>
+        <div class="input-group">
+            <label for="bevelSize">Bevel Size:</label>
+            <input type="number" id="bevelSize" value="0.5" min="0" step="0.1">
+        </div>
+        <hr>
+        <h4>Scene</h4>
+        <div class="input-group">
+            <button id="saveSceneButton" style="width: 100px; margin-right: 10px;">Save Scene</button>
+        </div>
+        <div class="input-group">
+            <label for="loadSceneFile">Load Scene:</label>
+            <input type="file" id="loadSceneFile" accept=".json">
+        </div>
+        <hr>
+         <small>Click object to select. Drag selected object to move on XY plane. Ctrl+Z to undo. Click empty space to deselect.</small>
+    </div>
+
+    <div id="container"></div>
+
+    <div id="textInputContainer">
+        <input type="text" id="customText" placeholder="Type text here...">
+        <button id="generateTextButton">RENDER</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/SVGLoader.js"></script>
+
+    <script>
+        let scene, camera, renderer, orbitControls;
+        let loadedObjectGroups = []; 
+        let raycaster;
+        let mouse;
+
+        let selectedObject = null;
+        let isDragging = false;
+        const dragPlane = new THREE.Plane();
+        const dragOffset = new THREE.Vector3();
+        const dragIntersection = new THREE.Vector3();
+        const Z_AXIS = new THREE.Vector3(0, 0, 1); 
+
+        let undoHistory = [];
+        const MAX_UNDO_STEPS = 20;
+
+        const extrudeDepthInput = document.getElementById('extrudeDepth');
+        const bevelThicknessInput = document.getElementById('bevelThickness');
+        const bevelSizeInput = document.getElementById('bevelSize');
+        
+        const customTextInput = document.getElementById('customText');
+        const generateTextButton = document.getElementById('generateTextButton');
+        const saveSceneButton = document.getElementById('saveSceneButton');
+        const loadSceneFileInput = document.getElementById('loadSceneFile');
+        const svgFontSelect = document.getElementById('svgFontSelect');
+
+
+        let originalSvgDataPaths = null; 
+        let currentSVGFileName = null; 
+        const desiredCharHeight = 20; 
+        let globalUniformScaleFactor = 1; 
+        let fontMetrics = { baselineY_SVG: 0 }; 
+
+        const FONT_BASE_URL = "https://y2do.net/fonts/";
+
+        init();
+
+        async function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x101010); 
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(0, desiredCharHeight * 0.75, desiredCharHeight * 3.5); 
+            camera.lookAt(0, desiredCharHeight / 2, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight1.position.set(15, 30, 25);
+            scene.add(directionalLight1);
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4); 
+            directionalLight2.position.set(-15, 20, -15);
+            scene.add(directionalLight2);
+
+            orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+            orbitControls.enableDamping = true;
+            orbitControls.target.set(0, desiredCharHeight / 2, 0); 
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            document.getElementById('svgFile').addEventListener('change', handleFileSelect, false);
+            window.addEventListener('resize', onWindowResize, false);
+            
+            renderer.domElement.addEventListener('pointerdown', onDocumentPointerDown, false);
+            renderer.domElement.addEventListener('pointermove', onDocumentPointerMove, false);
+            renderer.domElement.addEventListener('pointerup', onDocumentPointerUp, false);
+            window.addEventListener('keydown', handleKeyDown);
+
+            [extrudeDepthInput, bevelThicknessInput, bevelSizeInput].forEach(input => {
+                input.addEventListener('change', handleExtrudeParamsChange);
+            });
+
+            generateTextButton.addEventListener('click', processTextAndGenerate3D);
+            customTextInput.addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    processTextAndGenerate3D();
+                }
+            });
+
+            saveSceneButton.addEventListener('click', saveScene);
+            loadSceneFileInput.addEventListener('change', handleLoadSceneFile, false);
+            svgFontSelect.addEventListener('change', handleFontSelectChange);
+
+            await populateFontDropdown(); // Populate dropdown first
+            await loadSVGFromURL(FONT_BASE_URL + "ARIAL.svg", "ARIAL.svg"); // Load default font
+
+            animate();
+        }
+
+        async function populateFontDropdown() {
+            let fontList = [];
+            try {
+                console.log("Attempting to fetch: " + FONT_BASE_URL + "list.json"); // Added for debugging
+                const response = await fetch(FONT_BASE_URL + "list.json", { cache: "no-store" }); // Added no-store for aggressive cache busting during debug
+                console.log("Fetch response status:", response.status); // Added for debugging
+
+                if (!response.ok) {
+                    // This error will be caught by the catch block, but logging it here is also useful
+                    console.error(`HTTP error! status: ${response.status} while fetching list.json. Response text:`, await response.text().catch(() => "Could not read response text"));
+                    throw new Error(`HTTP error! status: ${response.status} while fetching list.json`);
+                }
+                fontList = await response.json();
+                console.log("Fetched fontList:", fontList); // Added for debugging
+
+                if (!Array.isArray(fontList) || !fontList.every(item => typeof item === 'string' && item.endsWith('.svg'))) {
+                    console.warn("Fetched list.json is not a valid array of SVG filenames. Using fallback. Content was:", JSON.stringify(fontList));
+                    fontList = ["arial.svg"]; // Fallback
+                }
+            } catch (error) {
+                console.warn("Could not fetch or parse font list from server (list.json). Using fallback list. Error:", error);
+                // Fallback list if server list fails
+                fontList = ["arial.svg", "helvetica.svg", "times_new_roman.svg"]; // Example fallback
+            }
+            
+            svgFontSelect.innerHTML = ""; // Clear existing options
+            fontList.forEach(fontName => {
+                const option = document.createElement('option');
+                option.value = fontName;
+                option.textContent = fontName.replace('.svg', '');
+                svgFontSelect.appendChild(option);
+            });
+
+            if (fontList.includes("arial.svg")) {
+                svgFontSelect.value = "arial.svg";
+            } else if (fontList.length > 0) { // Select the first one if arial is not present but list is not empty
+                svgFontSelect.value = fontList[0];
+            }
+        }
+        
+        async function handleFontSelectChange() {
+            const selectedFontName = svgFontSelect.value;
+            if (selectedFontName) {
+                const fontURL = FONT_BASE_URL + selectedFontName;
+                await loadSVGFromURL(fontURL, selectedFontName);
+            }
+        }
+
+        async function loadSVGFromURL(url, svgFileNameForDisplay) {
+            console.log(`Attempting to load SVG from URL: ${url}`);
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status} for ${svgFileNameForDisplay}`);
+                }
+                const svgTextData = await response.text();
+                processSVGData(svgTextData, svgFileNameForDisplay);
+            } catch (error) {
+                alert(`Error loading SVG font "${svgFileNameForDisplay}" from URL: ${error.message}\nPlease check server CORS settings and if the file exists.`);
+                console.error("Error in loadSVGFromURL:", error);
+                // Potentially clear current SVG if loading fails, or revert to a known good one
+                originalSvgDataPaths = null;
+                currentSVGFileName = null;
+                clearCurrent3DObjects();
+            }
+        }
+
+        function processSVGData(svgTextData, svgFileNameForDisplay) {
+            const loader = new THREE.SVGLoader();
+            try {
+                const parsedData = loader.parse(svgTextData);
+                originalSvgDataPaths = parsedData.paths;
+                currentSVGFileName = svgFileNameForDisplay; // Update global filename
+
+                globalUniformScaleFactor = 1;
+                fontMetrics.baselineY_SVG = 0;
+
+                let determinedBaselineY = false;
+                let maxCapHeightSVGUnits = 0;
+                let refCharIndexForBaseline = -1;
+                if (originalSvgDataPaths.length > 7 && originalSvgDataPaths[7]) refCharIndexForBaseline = 7; // 'H'
+                else if (originalSvgDataPaths.length > 23 && originalSvgDataPaths[23]) refCharIndexForBaseline = 23; // 'X'
+
+                if (refCharIndexForBaseline !== -1) {
+                    const pathData = originalSvgDataPaths[refCharIndexForBaseline];
+                    const shapes = THREE.SVGLoader.createShapes(pathData);
+                    if (shapes.length > 0) {
+                        const tempShapeGeom = new THREE.ShapeGeometry(shapes[0]);
+                        tempShapeGeom.computeBoundingBox();
+                        fontMetrics.baselineY_SVG = tempShapeGeom.boundingBox.max.y;
+                        determinedBaselineY = true;
+                        // console.log(`Determined SVG baseline Y from char index ${refCharIndexForBaseline} ('${String.fromCharCode(65 + refCharIndexForBaseline)}'): ${fontMetrics.baselineY_SVG.toFixed(4)}`);
+                        tempShapeGeom.dispose();
+                    }
+                }
+
+                for (let i = 0; i < 26; i++) { // A-Z
+                    if (i < originalSvgDataPaths.length) {
+                        const pathData = originalSvgDataPaths[i];
+                        if (pathData) {
+                            const shapes = THREE.SVGLoader.createShapes(pathData);
+                            if (shapes.length > 0) {
+                                const tempShapeGeom = new THREE.ShapeGeometry(shapes[0]);
+                                tempShapeGeom.computeBoundingBox();
+                                let charSVGHeight;
+                                if (determinedBaselineY) {
+                                    charSVGHeight = fontMetrics.baselineY_SVG - tempShapeGeom.boundingBox.min.y;
+                                } else {
+                                    charSVGHeight = tempShapeGeom.boundingBox.max.y - tempShapeGeom.boundingBox.min.y;
+                                }
+                                if (charSVGHeight > maxCapHeightSVGUnits) {
+                                    maxCapHeightSVGUnits = charSVGHeight;
+                                }
+                                tempShapeGeom.dispose();
+                            }
+                        }
+                    }
+                }
+
+                if (!determinedBaselineY) {
+                     console.warn("Could not determine SVG baseline Y from H or X. Text vertical alignment might be imperfect.");
+                     if (fontMetrics.baselineY_SVG === 0 && originalSvgDataPaths.length > 0 && maxCapHeightSVGUnits > 0) {
+                         for (let i = 0; i < 26; i++) { 
+                             if (i < originalSvgDataPaths.length && originalSvgDataPaths[i]) {
+                                 const pathData = originalSvgDataPaths[i];
+                                 const shapes = THREE.SVGLoader.createShapes(pathData);
+                                 if (shapes.length > 0) {
+                                    const tempShapeGeom = new THREE.ShapeGeometry(shapes[0]);
+                                    tempShapeGeom.computeBoundingBox();
+                                    fontMetrics.baselineY_SVG = tempShapeGeom.boundingBox.max.y;
+                                    // console.log(`Approximated SVG baseline Y from first capital ('${String.fromCharCode(65+i)}'): ${fontMetrics.baselineY_SVG.toFixed(4)}`);
+                                    tempShapeGeom.dispose();
+                                    break; 
+                                 }
+                             }
+                         }
+                     }
+                }
+                 if (maxCapHeightSVGUnits <= 0.001 && originalSvgDataPaths.length > 0 && originalSvgDataPaths[0]) {
+                    console.warn("Max cap height is zero or invalid from A-Z. Trying first path in SVG as fallback.");
+                    const shapes = THREE.SVGLoader.createShapes(originalSvgDataPaths[0]);
+                    if (shapes.length > 0) {
+                        const tempGeometry = new THREE.ShapeGeometry(shapes[0]);
+                        tempGeometry.computeBoundingBox();
+                        maxCapHeightSVGUnits = tempGeometry.boundingBox.max.y - tempGeometry.boundingBox.min.y;
+                        if(fontMetrics.baselineY_SVG === 0) fontMetrics.baselineY_SVG = tempGeometry.boundingBox.max.y;
+                        tempGeometry.dispose();
+                    }
+                }
+
+                if (maxCapHeightSVGUnits > 0.001) {
+                    globalUniformScaleFactor = desiredCharHeight / maxCapHeightSVGUnits;
+                    // console.log(`Max cap height in SVG units (top to baseline): ${maxCapHeightSVGUnits.toFixed(4)}. Global scale factor: ${globalUniformScaleFactor.toFixed(4)}.`);
+                } else {
+                    globalUniformScaleFactor = 1;
+                    console.warn("Could not determine valid SVG cap height. Using global scale factor 1.");
+                }
+                
+                clearCurrent3DObjects();
+                clearUndoHistory();
+                customTextInput.value = ""; // Clear text input when font changes
+                console.log(`SVG font "${svgFileNameForDisplay}" processed successfully. ${originalSvgDataPaths.length} paths. `);
+                // alert(`SVG font "${svgFileNameForDisplay}" loaded. Type text and Render.`);
+
+                // Update dropdown to reflect the loaded font
+                if (svgFontSelect.value !== svgFileNameForDisplay) {
+                    svgFontSelect.value = svgFileNameForDisplay;
+                }
+
+
+            } catch (error) {
+                alert(`Error parsing SVG data for "${svgFileNameForDisplay}": ${error.message}`);
+                console.error("Error in processSVGData:", error);
+                originalSvgDataPaths = null;
+                currentSVGFileName = null; // Clear if processing failed
+                clearCurrent3DObjects();
+            }
+        }
+
+
+        function handleExtrudeParamsChange() {
+            if (originalSvgDataPaths && customTextInput.value) { 
+                processTextAndGenerate3D();
+            }
+        }
+
+        function processTextAndGenerate3D() {
+            const inputText = customTextInput.value;
+            if (!originalSvgDataPaths) {
+                 alert("No SVG font loaded. Please select or import an SVG font first.");
+                 return;
+            }
+            if (!inputText.trim()) { 
+                clearCurrent3DObjects();
+                return;
+            }
+            generate3DModelsFromText(inputText, originalSvgDataPaths);
+        }
+
+        function clearCurrent3DObjects() {
+            if (selectedObject) {
+                selectedObject = null;
+            }
+            isDragging = false; 
+            orbitControls.enabled = true; 
+
+            loadedObjectGroups.forEach(group => {
+                scene.remove(group);
+                group.traverse(child => {
+                    if (child.isMesh) {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) child.material.forEach(mat => mat.dispose());
+                            else child.material.dispose();
+                        }
+                    }
+                });
+            });
+            loadedObjectGroups = [];
+        }
+        
+        function getAlphabetPathIndex(char) {
+            if (char >= 'A' && char <= 'Z') {
+                return char.charCodeAt(0) - 'A'.charCodeAt(0);
+            } else if (char >= 'a' && char <= 'z') {
+                return 26 + (char.charCodeAt(0) - 'a'.charCodeAt(0));
+            }
+            return -1; 
+        }
+
+        function generate3DModelsFromText(inputText, allPathsData) {
+            clearCurrent3DObjects(); 
+
+            const useBevels = (parseFloat(bevelThicknessInput.value) > 0 && parseFloat(bevelSizeInput.value) > 0);
+            const extrudeSettings = {
+                depth: parseFloat(extrudeDepthInput.value) || 10,
+                bevelEnabled: useBevels,
+                bevelThickness: parseFloat(bevelThicknessInput.value) || 1,
+                bevelSize: parseFloat(bevelSizeInput.value) || 0.5,
+                bevelOffset: 0,
+                bevelSegments: 3 
+            };
+            
+            let charDisplayIndex = 0; 
+            const tempLayoutData = []; 
+
+            for (let i = 0; i < inputText.length; i++) {
+                const char = inputText[i];
+                const pathDataIndex = getAlphabetPathIndex(char);
+
+                if (pathDataIndex !== -1 && pathDataIndex < allPathsData.length) {
+                    const pathData = allPathsData[pathDataIndex];
+                    if (!pathData) { 
+                        console.warn(`No pathData for character '${char}' (index ${pathDataIndex}). Skipping.`);
+                        continue;
+                    }
+                    const elementGroup = new THREE.Group();
+                    elementGroup.name = `Char_${char}_${charDisplayIndex++}`;
+
+                    const shapes = THREE.SVGLoader.createShapes(pathData);
+                    if (shapes.length === 0) {
+                        console.warn(`No shapes created for character '${char}'. Skipping.`);
+                        continue;
+                    }
+
+                    shapes.forEach((shape) => {
+                        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                        geometry.computeBoundingBox(); 
+
+                        const offsetX = -(geometry.boundingBox.max.x + geometry.boundingBox.min.x) / 2;
+                        geometry.translate(offsetX, -fontMetrics.baselineY_SVG, 0); 
+                        
+                        let fillColor = 0xffff00; 
+                         if (pathData.userData && pathData.userData.style &&
+                            pathData.userData.style.fill && pathData.userData.style.fill !== 'none' && pathData.userData.style.fill !== 'transparent') {
+                            try {
+                                fillColor = new THREE.Color(pathData.userData.style.fill).getHex();
+                            } catch (e) { /* Keep default */ }
+                        }
+                        const material = new THREE.MeshStandardMaterial({
+                            color: fillColor, metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide
+                        });
+                        const mesh = new THREE.Mesh(geometry, material);
+                        elementGroup.add(mesh);
+                    });
+
+                    if (elementGroup.children.length > 0) {
+                        elementGroup.scale.set(globalUniformScaleFactor, globalUniformScaleFactor, globalUniformScaleFactor);
+                        elementGroup.rotation.x = Math.PI; 
+
+                        elementGroup.updateMatrixWorld(true); 
+                        const charBox = new THREE.Box3().setFromObject(elementGroup);
+                        const charWidth = charBox.max.x - charBox.min.x;
+                        const charCenter = new THREE.Vector3(); 
+                        charBox.getCenter(charCenter);
+                        
+                        tempLayoutData.push({ group: elementGroup, charBox, charWidth, charCenter, isSpace: false });
+                        scene.add(elementGroup); 
+                        loadedObjectGroups.push(elementGroup); 
+                    }
+                } else if (char === ' ') {
+                    const spaceWidth = (desiredCharHeight * globalUniformScaleFactor) * 0.4; 
+                    tempLayoutData.push({ group: null, charWidth: spaceWidth, isSpace: true, name: `Space_${charDisplayIndex++}` });
+                }
+            }
+
+            if (tempLayoutData.length > 0) {
+                let totalArrangementWidth = 0;
+                const kerning = (desiredCharHeight * globalUniformScaleFactor) * 0.1; 
+
+                tempLayoutData.forEach(data => {
+                    if (data.charWidth > 0) totalArrangementWidth += data.charWidth;
+                });
+
+                const visibleElementsCount = tempLayoutData.filter(d => !d.isSpace && d.charWidth > 0).length;
+                if (visibleElementsCount > 1) {
+                    totalArrangementWidth += (kerning * (visibleElementsCount - 1));
+                }
+                
+                const startX = -totalArrangementWidth / 2;
+                let currentXOffset = startX;
+
+                tempLayoutData.forEach((data, index) => {
+                    if (data.isSpace) {
+                        if (data.charWidth > 0) {
+                             currentXOffset += data.charWidth;
+                             if (index > 0 && !tempLayoutData[index-1].isSpace && 
+                                 index < tempLayoutData.length -1 && !tempLayoutData[index+1].isSpace && tempLayoutData[index+1].charWidth > 0) { 
+                                currentXOffset += kerning;
+                             }
+                        }
+                    } else { 
+                        data.group.position.y = 0; 
+                        data.group.position.z = -data.charCenter.z; 
+                        data.group.position.x = (currentXOffset + data.charWidth / 2) - data.charCenter.x;
+                        
+                        if (data.charWidth > 0) {
+                            currentXOffset += data.charWidth;
+                            let nextVisibleElementExists = false;
+                            for(let k=index+1; k < tempLayoutData.length; k++) {
+                                if(!tempLayoutData[k].isSpace && tempLayoutData[k].charWidth > 0) {
+                                    nextVisibleElementExists = true;
+                                    break;
+                                }
+                            }
+                            if (nextVisibleElementExists) {
+                                currentXOffset += kerning;
+                            }
+                        }
+                    }
+                });
+                orbitControls.target.set(0, (desiredCharHeight / 2.0) , 0); 
+            }
+            orbitControls.update();
+        }
+
+        function addUndoState(object, position) {
+            if (!object) return;
+            if (undoHistory.length >= MAX_UNDO_STEPS) {
+                undoHistory.shift();
+            }
+            undoHistory.push({ object: object, position: position.clone() });
+        }
+
+        function clearUndoHistory() {
+            undoHistory = [];
+        }
+
+        function handleKeyDown(event) {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+                event.preventDefault();
+                if (undoHistory.length > 0) {
+                    const lastState = undoHistory.pop();
+                    if (lastState && lastState.object) {
+                        let stillInScene = loadedObjectGroups.includes(lastState.object);
+                        if (stillInScene) {
+                            lastState.object.position.copy(lastState.position);
+                            selectedObject = lastState.object; 
+                        } else {
+                             if(undoHistory.length > 0) handleKeyDown(event); 
+                        }
+                    }
+                }
+            }
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file && file.type === "image/svg+xml") {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    processSVGData(e.target.result, file.name);
+                };
+                reader.readAsText(file);
+            } else if (file) {
+                alert("Please select a valid SVG file.");
+            }
+            document.getElementById('svgFile').value = ''; // Clear file input
+        }
+
+
+        function onDocumentPointerDown(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            
+            const intersects = raycaster.intersectObjects(loadedObjectGroups, true);
+
+            if (intersects.length > 0) {
+                const intersectedMesh = intersects[0].object;
+                let hitGroup = intersectedMesh;
+                while (hitGroup.parent && !loadedObjectGroups.includes(hitGroup) && hitGroup.parent !== scene) {
+                    hitGroup = hitGroup.parent;
+                }
+
+                if (hitGroup && loadedObjectGroups.includes(hitGroup)) {
+                    selectedObject = hitGroup;
+                    addUndoState(selectedObject, selectedObject.position); 
+                    isDragging = true;
+                    orbitControls.enabled = false;
+                    dragPlane.setFromNormalAndCoplanarPoint(Z_AXIS, selectedObject.position); 
+                    if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                        dragOffset.copy(selectedObject.position).sub(dragIntersection);
+                    }
+                }
+            } else { 
+                if (selectedObject && !isDragging) { 
+                    selectedObject = null;
+                }
+            }
+        }
+
+        function onDocumentPointerMove(event) {
+            if (isDragging && selectedObject) {
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                    const newPos = dragIntersection.add(dragOffset);
+                    selectedObject.position.set(newPos.x, newPos.y, selectedObject.position.z); 
+                }
+            }
+        }
+
+        function onDocumentPointerUp(event) {
+            if (isDragging) {
+                isDragging = false;
+                orbitControls.enabled = true;
+            }
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbitControls.update();
+            renderer.render(scene, camera);
+        }
+
+        function sanitizeFileName(name) {
+            if (!name || typeof name !== 'string') return "3DTextScene";
+            return name.replace(/[^a-z0-9_\-\s\.]/gi, '_').replace(/\s+/g, '_').substring(0, 50) || "3DTextScene";
+        }
+
+        function saveScene() {
+            if (!currentSVGFileName) {
+                alert("Cannot save scene: No SVG font is currently loaded.");
+                return;
+            }
+             if (loadedObjectGroups.length === 0 && !customTextInput.value.trim()) {
+                alert("Nothing to save. Please render some text first.");
+                return;
+            }
+
+            const sceneData = {
+                version: "1.0",
+                svgFileName: currentSVGFileName,
+                text: customTextInput.value,
+                extrudeSettings: {
+                    depth: parseFloat(extrudeDepthInput.value),
+                    bevelThickness: parseFloat(bevelThicknessInput.value),
+                    bevelSize: parseFloat(bevelSizeInput.value)
+                },
+                fontMetrics: JSON.parse(JSON.stringify(fontMetrics)), 
+                globalUniformScaleFactor: globalUniformScaleFactor,
+                characters: loadedObjectGroups.map(group => ({
+                    name: group.name,
+                    position: {
+                        x: group.position.x,
+                        y: group.position.y,
+                        z: group.position.z
+                    }
+                }))
+            };
+
+            const defaultFileNameBase = customTextInput.value.trim() ? sanitizeFileName(customTextInput.value) : sanitizeFileName(currentSVGFileName.replace('.svg',''));
+            const fileName = prompt("Enter filename for saving:", defaultFileNameBase + ".json");
+            if (!fileName) return; 
+
+            const blob = new Blob([JSON.stringify(sceneData, null, 2)], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName.endsWith('.json') ? fileName : fileName + '.json';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        }
+
+        function handleLoadSceneFile(event) {
+            const file = event.target.files[0];
+            if (file && file.name.endsWith(".json")) {
+                const reader = new FileReader();
+                reader.onload = async function(e) { // Make async for potential SVG load
+                    try {
+                        const savedData = JSON.parse(e.target.result);
+                        await loadSceneData(savedData); // Make loadSceneData async
+                    } catch (err) {
+                        alert("Error parsing scene file: " + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            } else if (file) {
+                alert("Please select a valid .json scene file.");
+            }
+            loadSceneFileInput.value = ''; 
+        }
+
+        async function loadSceneData(savedData) { // Now async
+            if (!savedData || !savedData.version ) { // Check for version
+                alert("Invalid or unsupported scene file format.");
+                return;
+            }
+             if (savedData.version !== "1.0") { // Example version check
+                alert(`Scene file version ${savedData.version} is not supported. This tool supports version 1.0.`);
+                return;
+            }
+
+
+            // CRITICAL: Check if the required SVG is loaded or needs to be loaded
+            if (savedData.svgFileName) {
+                if (!currentSVGFileName || currentSVGFileName !== savedData.svgFileName) {
+                    const confirmLoad = confirm(`This scene requires the SVG font: "${savedData.svgFileName}".\nPress OK to attempt loading it from ${FONT_BASE_URL}.\nPress Cancel to abort loading the scene.`);
+                    if (confirmLoad) {
+                        // Try to find it in the dropdown, otherwise assume it's from FONT_BASE_URL
+                        const fontExistsInDropdown = Array.from(svgFontSelect.options).some(opt => opt.value === savedData.svgFileName);
+                        if (fontExistsInDropdown) {
+                            svgFontSelect.value = savedData.svgFileName; // This will trigger handleFontSelectChange
+                            await loadSVGFromURL(FONT_BASE_URL + savedData.svgFileName, savedData.svgFileName); // Explicitly wait
+                        } else {
+                             // If not in dropdown, still try to load from the base URL (might be a custom one not in list.json)
+                            await loadSVGFromURL(FONT_BASE_URL + savedData.svgFileName, savedData.svgFileName);
+                        }
+                        // Check if loading was successful
+                        if (currentSVGFileName !== savedData.svgFileName) {
+                            alert(`Failed to load the required SVG font "${savedData.svgFileName}". Scene loading aborted.`);
+                            return;
+                        }
+                    } else {
+                         alert("Scene loading aborted. Please load the correct SVG font manually if available, then try loading the scene file again.");
+                        return; 
+                    }
+                }
+            } else {
+                alert("Warning: Loaded scene does not specify an SVG font. Results may be incorrect if the current font is not the one used to create the scene.");
+            }
+
+
+            clearCurrent3DObjects(); // Already cleared by processSVGData if font changed
+            clearUndoHistory();
+
+            customTextInput.value = savedData.text || "";
+            if (savedData.extrudeSettings) {
+                extrudeDepthInput.value = savedData.extrudeSettings.depth || 10;
+                bevelThicknessInput.value = savedData.extrudeSettings.bevelThickness || 1;
+                bevelSizeInput.value = savedData.extrudeSettings.bevelSize || 0.5;
+            }
+
+            if (savedData.fontMetrics) {
+                fontMetrics = JSON.parse(JSON.stringify(savedData.fontMetrics));
+            } else { 
+                fontMetrics = { baselineY_SVG: 0}; 
+            }
+            globalUniformScaleFactor = savedData.globalUniformScaleFactor || 1;
+            
+            if (customTextInput.value.trim() && originalSvgDataPaths) { 
+                generate3DModelsFromText(customTextInput.value, originalSvgDataPaths); 
+
+                if (savedData.characters && savedData.characters.length > 0 && loadedObjectGroups.length > 0) {
+                    savedData.characters.forEach(savedChar => {
+                        const targetGroup = loadedObjectGroups.find(group => group.name === savedChar.name);
+                        if (targetGroup && savedChar.position) {
+                            targetGroup.position.set(savedChar.position.x, savedChar.position.y, savedChar.position.z);
+                        }
+                    });
+                }
+                alert("Scene loaded successfully.");
+            } else if (customTextInput.value.trim() && !originalSvgDataPaths && savedData.svgFileName) {
+                 alert("Scene data restored, but text cannot be rendered because the required SVG font '" + savedData.svgFileName + "' could not be fully processed or is missing.");
+            } else if (!customTextInput.value.trim()){
+                alert("Scene settings (font, extrude params) loaded. No text to render.");
+            }
+
+
+            orbitControls.target.set(0, desiredCharHeight / 2, 0);
+            orbitControls.update();
+        }
+
+    </script>
+</body>
+</html>

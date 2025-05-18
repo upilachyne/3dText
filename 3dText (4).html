@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG to 3D - Text Input</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        #container { width: 100vw; height: 100vh; display: block; }
+        #controlsPanel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.65);
+            color: white;
+            border-radius: 5px;
+            z-index: 100;
+            max-width: 280px;
+        }
+        label { margin-right: 5px; display: inline-block; min-width: 100px; font-size: 0.9em;}
+        input[type="number"] { width: 60px; margin-right: 10px; margin-bottom: 5px; padding: 3px;}
+        input[type="file"] { margin-bottom: 10px; }
+        .input-group { margin-bottom: 8px; }
+        hr { border-color: #555; margin: 12px 0;}
+        h4 { margin-top: 0; margin-bottom: 8px; border-bottom: 1px solid #555; padding-bottom: 4px;}
+
+        #textInputContainer {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background-color: rgba(20,20,20,0.75);
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        #customText {
+            padding: 12px 15px;
+            font-size: 18px;
+            margin-right: 10px;
+            border: 1px solid #007bff;
+            background-color: #1a1a1a;
+            color: white;
+            border-radius: 5px;
+            min-width: 250px;
+        }
+        #customText::placeholder {
+            color: #888;
+        }
+        #generateTextButton {
+            padding: 12px 20px;
+            font-size: 18px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #generateTextButton:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controlsPanel">
+        <h4>SVG Import & Extrude</h4>
+        <div class="input-group">
+            <label for="svgFile">Import SVG:</label>
+            <input type="file" id="svgFile" accept=".svg">
+        </div>
+        <div class="input-group">
+            <label for="extrudeDepth">Extrude Depth:</label>
+            <input type="number" id="extrudeDepth" value="10" min="1" step="1">
+        </div>
+        <div class="input-group">
+            <label for="bevelThickness">Bevel Thick:</label>
+            <input type="number" id="bevelThickness" value="1" min="0" step="0.1">
+        </div>
+        <div class="input-group">
+            <label for="bevelSize">Bevel Size:</label>
+            <input type="number" id="bevelSize" value="0.5" min="0" step="0.1">
+        </div>
+        <hr>
+         <small>Click object to select. Drag selected object to move on XY plane. Ctrl+Z to undo. Click empty space to deselect.</small>
+    </div>
+
+    <div id="container"></div>
+
+    <div id="textInputContainer">
+        <input type="text" id="customText" placeholder="Type text here...">
+        <button id="generateTextButton">RENDER</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/SVGLoader.js"></script>
+
+    <script>
+        let scene, camera, renderer, orbitControls;
+        let loadedObjectGroups = []; 
+        let raycaster;
+        let mouse;
+
+        let selectedObject = null;
+        let isDragging = false;
+        const dragPlane = new THREE.Plane();
+        const dragOffset = new THREE.Vector3();
+        const dragIntersection = new THREE.Vector3();
+        const Z_AXIS = new THREE.Vector3(0, 0, 1); 
+
+        let undoHistory = [];
+        const MAX_UNDO_STEPS = 20;
+
+        const extrudeDepthInput = document.getElementById('extrudeDepth');
+        const bevelThicknessInput = document.getElementById('bevelThickness');
+        const bevelSizeInput = document.getElementById('bevelSize');
+        
+        const customTextInput = document.getElementById('customText');
+        const generateTextButton = document.getElementById('generateTextButton');
+
+        let originalSvgDataPaths = null; 
+        const desiredCharHeight = 20; 
+        let globalUniformScaleFactor = 1; 
+        let fontMetrics = { baselineY_SVG: 0 }; // Stores SVG font baseline info
+
+        init();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x101010); 
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(0, desiredCharHeight * 0.75, desiredCharHeight * 3.5); 
+            camera.lookAt(0, desiredCharHeight / 2, 0); // Target middle of cap-height area
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.9);
+            directionalLight1.position.set(15, 30, 25);
+            scene.add(directionalLight1);
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4); 
+            directionalLight2.position.set(-15, 20, -15);
+            scene.add(directionalLight2);
+
+            orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+            orbitControls.enableDamping = true;
+            orbitControls.target.set(0, desiredCharHeight / 2, 0); 
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            document.getElementById('svgFile').addEventListener('change', handleFileSelect, false);
+            window.addEventListener('resize', onWindowResize, false);
+            
+            renderer.domElement.addEventListener('pointerdown', onDocumentPointerDown, false);
+            renderer.domElement.addEventListener('pointermove', onDocumentPointerMove, false);
+            renderer.domElement.addEventListener('pointerup', onDocumentPointerUp, false);
+            window.addEventListener('keydown', handleKeyDown);
+
+            [extrudeDepthInput, bevelThicknessInput, bevelSizeInput].forEach(input => {
+                input.addEventListener('change', handleExtrudeParamsChange);
+            });
+
+            generateTextButton.addEventListener('click', processTextAndGenerate3D);
+            customTextInput.addEventListener('keypress', function(event) {
+                if (event.key === 'Enter') {
+                    processTextAndGenerate3D();
+                }
+            });
+            animate();
+        }
+        
+        function handleExtrudeParamsChange() {
+            if (originalSvgDataPaths && customTextInput.value) { 
+                processTextAndGenerate3D();
+            }
+        }
+
+        function processTextAndGenerate3D() {
+            const inputText = customTextInput.value;
+            if (!originalSvgDataPaths) {
+                 alert("Please load an SVG file first that contains alphabet characters (A-Z, then a-z).");
+                 return;
+            }
+            if (!inputText.trim()) { 
+                clearCurrent3DObjects();
+                return;
+            }
+            generate3DModelsFromText(inputText, originalSvgDataPaths);
+        }
+
+        function clearCurrent3DObjects() {
+            if (selectedObject) {
+                selectedObject = null;
+            }
+            isDragging = false; 
+            orbitControls.enabled = true; 
+
+            loadedObjectGroups.forEach(group => {
+                scene.remove(group);
+                group.traverse(child => {
+                    if (child.isMesh) {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) child.material.forEach(mat => mat.dispose());
+                            else child.material.dispose();
+                        }
+                    }
+                });
+            });
+            loadedObjectGroups = [];
+        }
+        
+        function getAlphabetPathIndex(char) {
+            if (char >= 'A' && char <= 'Z') {
+                return char.charCodeAt(0) - 'A'.charCodeAt(0);
+            } else if (char >= 'a' && char <= 'z') {
+                return 26 + (char.charCodeAt(0) - 'a'.charCodeAt(0));
+            }
+            return -1; 
+        }
+
+        function generate3DModelsFromText(inputText, allPathsData) {
+            clearCurrent3DObjects(); 
+            clearUndoHistory(); 
+
+            const useBevels = (parseFloat(bevelThicknessInput.value) > 0 && parseFloat(bevelSizeInput.value) > 0);
+            const extrudeSettings = {
+                depth: parseFloat(extrudeDepthInput.value) || 10,
+                bevelEnabled: useBevels,
+                bevelThickness: parseFloat(bevelThicknessInput.value) || 1,
+                bevelSize: parseFloat(bevelSizeInput.value) || 0.5,
+                bevelOffset: 0,
+                bevelSegments: 3 
+            };
+            
+            let charDisplayIndex = 0; 
+            const tempLayoutData = []; 
+
+            for (let i = 0; i < inputText.length; i++) {
+                const char = inputText[i];
+                const pathDataIndex = getAlphabetPathIndex(char);
+
+                if (pathDataIndex !== -1 && pathDataIndex < allPathsData.length) {
+                    const pathData = allPathsData[pathDataIndex];
+                    if (!pathData) { 
+                        console.warn(`No pathData for character '${char}' (index ${pathDataIndex}). Skipping.`);
+                        continue;
+                    }
+                    const elementGroup = new THREE.Group();
+                    elementGroup.name = `Char_${char}_${charDisplayIndex++}`;
+
+                    const shapes = THREE.SVGLoader.createShapes(pathData);
+                    if (shapes.length === 0) {
+                        console.warn(`No shapes created for character '${char}'. Skipping.`);
+                        continue;
+                    }
+
+                    shapes.forEach((shape) => {
+                        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                        geometry.computeBoundingBox(); 
+
+                        const offsetX = -(geometry.boundingBox.max.x + geometry.boundingBox.min.x) / 2;
+                        // Translate geometry so the font's SVG baseline is at Y=0 in local mesh space
+                        geometry.translate(offsetX, -fontMetrics.baselineY_SVG, 0); 
+                        
+                        let fillColor = 0xffff00; 
+                         if (pathData.userData && pathData.userData.style &&
+                            pathData.userData.style.fill && pathData.userData.style.fill !== 'none' && pathData.userData.style.fill !== 'transparent') {
+                            try {
+                                fillColor = new THREE.Color(pathData.userData.style.fill).getHex();
+                            } catch (e) { console.warn(`Could not parse fill color '${pathData.userData.style.fill}' for char ${char}. Using default.`);}
+                        }
+                        const material = new THREE.MeshStandardMaterial({
+                            color: fillColor, metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide
+                        });
+                        const mesh = new THREE.Mesh(geometry, material);
+                        elementGroup.add(mesh);
+                    });
+
+                    if (elementGroup.children.length > 0) {
+                        elementGroup.scale.set(globalUniformScaleFactor, globalUniformScaleFactor, globalUniformScaleFactor);
+                        elementGroup.rotation.x = Math.PI; 
+
+                        elementGroup.updateMatrixWorld(true); 
+                        const charBox = new THREE.Box3().setFromObject(elementGroup);
+                        const charWidth = charBox.max.x - charBox.min.x;
+                        const charCenter = new THREE.Vector3(); 
+                        charBox.getCenter(charCenter);
+                        
+                        tempLayoutData.push({ group: elementGroup, charBox, charWidth, charCenter, isSpace: false });
+                        scene.add(elementGroup); 
+                        loadedObjectGroups.push(elementGroup); 
+                    }
+                } else if (char === ' ') {
+                    const spaceWidth = (desiredCharHeight * globalUniformScaleFactor) * 0.4; 
+                    tempLayoutData.push({ group: null, charWidth: spaceWidth, isSpace: true, name: `Space_${charDisplayIndex++}` });
+                }
+            }
+
+            if (tempLayoutData.length > 0) {
+                let totalArrangementWidth = 0;
+                const kerning = (desiredCharHeight * globalUniformScaleFactor) * 0.1; 
+
+                tempLayoutData.forEach(data => {
+                    if (data.charWidth > 0) totalArrangementWidth += data.charWidth;
+                });
+
+                const visibleElementsCount = tempLayoutData.filter(d => !d.isSpace && d.charWidth > 0).length;
+                if (visibleElementsCount > 1) {
+                    totalArrangementWidth += (kerning * (visibleElementsCount - 1));
+                }
+                
+                const startX = -totalArrangementWidth / 2;
+                let currentXOffset = startX;
+
+                tempLayoutData.forEach((data, index) => {
+                    if (data.isSpace) {
+                        if (data.charWidth > 0) {
+                             currentXOffset += data.charWidth;
+                             if (index > 0 && !tempLayoutData[index-1].isSpace && 
+                                 index < tempLayoutData.length -1 && !tempLayoutData[index+1].isSpace && tempLayoutData[index+1].charWidth > 0) { 
+                                currentXOffset += kerning;
+                             }
+                        }
+                    } else { 
+                        data.group.position.y = 0; // Baseline alignment is handled by geometry translation
+                        data.group.position.z = -data.charCenter.z; // Center extrusion depth at Z=0
+                        data.group.position.x = (currentXOffset + data.charWidth / 2) - data.charCenter.x;
+                        
+                        if (data.charWidth > 0) {
+                            currentXOffset += data.charWidth;
+                            let nextVisibleElementExists = false;
+                            for(let k=index+1; k < tempLayoutData.length; k++) {
+                                if(!tempLayoutData[k].isSpace && tempLayoutData[k].charWidth > 0) {
+                                    nextVisibleElementExists = true;
+                                    break;
+                                }
+                            }
+                            if (nextVisibleElementExists) {
+                                currentXOffset += kerning;
+                            }
+                        }
+                    }
+                });
+                orbitControls.target.set(0, (desiredCharHeight / 2.0) , 0); 
+            }
+            orbitControls.update();
+        }
+
+
+        function addUndoState(object, position) {
+            if (!object) return;
+            if (undoHistory.length >= MAX_UNDO_STEPS) {
+                undoHistory.shift();
+            }
+            undoHistory.push({ object: object, position: position.clone() });
+        }
+
+        function clearUndoHistory() {
+            undoHistory = [];
+        }
+
+        function handleKeyDown(event) {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+                event.preventDefault();
+                if (undoHistory.length > 0) {
+                    const lastState = undoHistory.pop();
+                    if (lastState && lastState.object) {
+                        let stillInScene = loadedObjectGroups.includes(lastState.object);
+                        if (stillInScene) {
+                            lastState.object.position.copy(lastState.position);
+                            selectedObject = lastState.object; 
+                        } else {
+                             if(undoHistory.length > 0) handleKeyDown(event); 
+                        }
+                    }
+                }
+            }
+        }
+
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file && file.type === "image/svg+xml") {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const svgData = e.target.result;
+                    const loader = new THREE.SVGLoader();
+                    try {
+                        const parsedData = loader.parse(svgData); 
+                        originalSvgDataPaths = parsedData.paths;
+                        globalUniformScaleFactor = 1; 
+                        fontMetrics.baselineY_SVG = 0; // Reset
+
+                        let determinedBaselineY = false;
+                        let maxCapHeightSVGUnits = 0;
+
+                        // Try to determine baseline from 'H' (index 7) or 'X' (index 23)
+                        let refCharIndexForBaseline = -1;
+                        if (originalSvgDataPaths.length > 7 && originalSvgDataPaths[7]) refCharIndexForBaseline = 7; // 'H'
+                        else if (originalSvgDataPaths.length > 23 && originalSvgDataPaths[23]) refCharIndexForBaseline = 23; // 'X'
+
+                        if (refCharIndexForBaseline !== -1) {
+                            const pathData = originalSvgDataPaths[refCharIndexForBaseline];
+                            const shapes = THREE.SVGLoader.createShapes(pathData);
+                            if (shapes.length > 0) {
+                                const tempShapeGeom = new THREE.ShapeGeometry(shapes); 
+                                tempShapeGeom.computeBoundingBox();
+                                fontMetrics.baselineY_SVG = tempShapeGeom.boundingBox.max.y; 
+                                determinedBaselineY = true;
+                                console.log(`Determined SVG baseline Y from char index ${refCharIndexForBaseline} ('${String.fromCharCode(65 + refCharIndexForBaseline)}'): ${fontMetrics.baselineY_SVG.toFixed(4)}`);
+                                tempShapeGeom.dispose();
+                            }
+                        }
+
+                        // Calculate maxCapHeightSVGUnits using capital letters (A-Z, indices 0-25)
+                        // Cap height is distance from char top (min.y) to baseline (fontMetrics.baselineY_SVG)
+                        for (let i = 0; i < 26; i++) { 
+                            if (i < originalSvgDataPaths.length) {
+                                const pathData = originalSvgDataPaths[i];
+                                if (pathData) { 
+                                    const shapes = THREE.SVGLoader.createShapes(pathData);
+                                    if (shapes.length > 0) {
+                                        const tempShapeGeom = new THREE.ShapeGeometry(shapes);
+                                        tempShapeGeom.computeBoundingBox();
+                                        let charSVGHeight;
+                                        if (determinedBaselineY) {
+                                            // Height from character's min.y (top) to the font's baseline
+                                            charSVGHeight = fontMetrics.baselineY_SVG - tempShapeGeom.boundingBox.min.y;
+                                        } else {
+                                            // Fallback: use full height if baseline couldn't be determined
+                                            charSVGHeight = tempShapeGeom.boundingBox.max.y - tempShapeGeom.boundingBox.min.y; 
+                                        }
+                                        if (charSVGHeight > maxCapHeightSVGUnits) {
+                                            maxCapHeightSVGUnits = charSVGHeight;
+                                        }
+                                        tempShapeGeom.dispose();
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (!determinedBaselineY) {
+                             console.warn("Could not determine SVG baseline Y from H or X. Text vertical alignment might be imperfect. Using full char height for scaling and assuming baselineY_SVG = 0 for geometry translation if no caps found.");
+                             // If baseline is still 0 and we have paths, try to guess baseline from first capital's max.y
+                             if (fontMetrics.baselineY_SVG === 0 && originalSvgDataPaths.length > 0 && maxCapHeightSVGUnits > 0) {
+                                 for (let i = 0; i < 26; i++) { // Find first available capital
+                                     if (i < originalSvgDataPaths.length && originalSvgDataPaths[i]) {
+                                         const pathData = originalSvgDataPaths[i];
+                                         const shapes = THREE.SVGLoader.createShapes(pathData);
+                                         if (shapes.length > 0) {
+                                            const tempShapeGeom = new THREE.ShapeGeometry(shapes);
+                                            tempShapeGeom.computeBoundingBox();
+                                            fontMetrics.baselineY_SVG = tempShapeGeom.boundingBox.max.y;
+                                            console.log(`Approximated SVG baseline Y from first capital ('${String.fromCharCode(65+i)}'): ${fontMetrics.baselineY_SVG.toFixed(4)} (full height was used for scaling)`);
+                                            tempShapeGeom.dispose();
+                                            break; 
+                                         }
+                                     }
+                                 }
+                             }
+                        }
+                         if (maxCapHeightSVGUnits <= 0.001 && originalSvgDataPaths.length > 0 && originalSvgDataPaths[0]) { // Fallback further if no caps gave height
+                            console.warn("Max cap height is zero or invalid from A-Z. Trying first path in SVG as fallback for scaling height.");
+                            const shapes = THREE.SVGLoader.createShapes(originalSvgDataPaths[0]);
+                            if (shapes.length > 0) {
+                                const tempGeometry = new THREE.ShapeGeometry(shapes);
+                                tempGeometry.computeBoundingBox();
+                                maxCapHeightSVGUnits = tempGeometry.boundingBox.max.y - tempGeometry.boundingBox.min.y;
+                                if(fontMetrics.baselineY_SVG === 0) fontMetrics.baselineY_SVG = tempGeometry.boundingBox.max.y; // Also guess baseline
+                                tempGeometry.dispose();
+                            }
+                        }
+
+
+                        if (maxCapHeightSVGUnits > 0.001) {
+                            globalUniformScaleFactor = desiredCharHeight / maxCapHeightSVGUnits;
+                            console.log(`Max cap height in SVG units (top to baseline): ${maxCapHeightSVGUnits.toFixed(4)}. Global scale factor: ${globalUniformScaleFactor.toFixed(4)}.`);
+                        } else {
+                            globalUniformScaleFactor = 1; // Fallback if no valid height found
+                            console.warn("Could not determine valid SVG cap height. Using global scale factor 1.");
+                        }
+                        
+                        clearCurrent3DObjects(); 
+                        clearUndoHistory();     
+                        customTextInput.value = ""; 
+                        alert(`SVG file "${file.name}" loaded (${originalSvgDataPaths.length} paths). Text will be scaled and baseline-aligned. Type text and Render.`);
+                    } catch (error) {
+                        alert("Error parsing SVG file: " + error.message);
+                        originalSvgDataPaths = null;
+                        globalUniformScaleFactor = 1;
+                        fontMetrics.baselineY_SVG = 0;
+                    }
+                };
+                reader.readAsText(file);
+            } else {
+                alert("Please select a valid SVG file.");
+                originalSvgDataPaths = null;
+                globalUniformScaleFactor = 1;
+                fontMetrics.baselineY_SVG = 0;
+            }
+        }
+
+        function onDocumentPointerDown(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            
+            const intersects = raycaster.intersectObjects(loadedObjectGroups, true);
+
+            if (intersects.length > 0) {
+                const intersectedMesh = intersects[0].object;
+                let hitGroup = intersectedMesh;
+                while (hitGroup.parent && !loadedObjectGroups.includes(hitGroup) && hitGroup.parent !== scene) {
+                    hitGroup = hitGroup.parent;
+                }
+
+                if (hitGroup && loadedObjectGroups.includes(hitGroup)) {
+                    selectedObject = hitGroup;
+                    addUndoState(selectedObject, selectedObject.position); 
+                    isDragging = true;
+                    orbitControls.enabled = false;
+                    dragPlane.setFromNormalAndCoplanarPoint(Z_AXIS, selectedObject.position); 
+                    if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                        dragOffset.copy(selectedObject.position).sub(dragIntersection);
+                    }
+                }
+            } else { 
+                if (selectedObject && !isDragging) { 
+                    selectedObject = null;
+                }
+            }
+        }
+
+        function onDocumentPointerMove(event) {
+            if (isDragging && selectedObject) {
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                    const newPos = dragIntersection.add(dragOffset);
+                    selectedObject.position.set(newPos.x, newPos.y, selectedObject.position.z); 
+                }
+            }
+        }
+
+        function onDocumentPointerUp(event) {
+            if (isDragging) {
+                isDragging = false;
+                orbitControls.enabled = true;
+            }
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbitControls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
