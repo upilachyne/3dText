@@ -47,7 +47,7 @@ This project is a web-based tool that allows users to generate 3D text from SVG 
 7.  **Toggle Controls:** Use the "Toggle Controls" button to show/hide the controls panel.
 
 ## Important Notes
-
+* **RUN** python -m http.server
 * **Font Files:** The application expects SVG font files to be in a specific format that Three.js's `SVGLoader` can parse. Ensure your SVG files are compatible.
 * **`list.json`:** Maintaining an accurate `list.json` in the `fonts/` directory is crucial for the font selection dropdown to work correctly.
 * **Local Server:** Due to browser security restrictions (CORS), loading local files (especially fonts and the HDRI environment map) might require running the application from a local web server (e.g., using Python's `http.server` or Node.js's `http-server`).
