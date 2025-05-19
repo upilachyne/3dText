@@ -1,82 +1,82 @@
-#   Generator Teks SVG ke 3D
+#   Gawe Tèks 3D Saka SVG
 
-Proyek ini adalah alat berbasis web yang memungkinkan pengguna untuk menghasilkan teks 3D dari font SVG atau berkas SVG yang diunggah pengguna. Ia menggunakan Three.js untuk rendering 3D dan menyediakan kontrol untuk menyesuaikan tampilan dan scene.
+Proyèk iki alat neng web sing isa nggawèné kowé nggawe tèks 3D saka font SVG utawa file SVG sing diunggah déwé. Iki nganggo Three.js nggo ngrènder 3D lan nyediakné kontrol nggo ngatur tampilan lan scènè.
 
-##   Fitur
+##   Fitur-Fitur
 
-* **Pemilihan/Unggah Font SVG:** Pilih dari pilihan font SVG yang disediakan atau unggah berkas SVG Anda sendiri untuk menentukan bentuk teks.
-* **Input Teks:** Masukkan teks yang ingin Anda render dalam 3D.
-* **Pemilihan Material:** Terapkan berbagai preset material (misalnya, emas, perak) ke teks 3D.
-* **Penyimpanan/Pemuatan Scene:** Simpan dan muat seluruh konfigurasi scene (teks, font, posisi objek, material) sebagai berkas JSON.
-* **Interaksi Objek:** Pilih, seret, dan pindahkan objek teks 3D individual di dalam scene.
-* **Fungsi Undo:** Dukungan undo dasar untuk pergerakan objek.
-* **Desain Responsif:** Aplikasi beradaptasi dengan berbagai ukuran layar.
+* **Milih/Unggah Font SVG:** Isa milih saka font SVG sing wis disediakné utawa ngunggah file SVG duwèkmèdèwé nggo nemtokaké wujud tèksè.
+* **Input Tèks:** Nglebokké tèks sing pengin dirènder dadi 3D.
+* **Milih Matèrial:** Nganggo macem-macem prèset matèrial (umpamané, emas, pérak) neng tèks 3D.
+* **Nyimpen/Ngunggah Scènè:** Nyimpen lan ngunggah kabèh konfigurasi scènè (tèks, font, posisi objèk, matèrial) dadi file JSON.
+* **Interaksi Objèk:** Milih, nyèrèt, lan mindahné objèk tèks 3D siji-siji neng njero scènè.
+* **Fungsi Undo:** Dhukungan undo dasar nggo mindahné objèk.
+* **Dhèsain Rèsponsif:** Aplikasi iki isa ganti ukuran nggo nyocogaké ukuran layar sing béda-béda.
 
-##   Teknologi yang Digunakan
+##   Tèknologi Sing Dienggo
 
-* **Three.js:** Pustaka JavaScript untuk membuat dan menampilkan grafik 3D di peramban web.
-* **HTML/CSS:** Untuk menyusun dan menata halaman web.
-* **JavaScript:** Untuk logika dan interaktivitas aplikasi.
+* **Three.js:** Pustaka JavaScript nggo nggawe lan nampilné grafik 3D neng browser web.
+* **HTML/CSS:** Nggo nyusun lan ngèstail kaca web.
+* **JavaScript:** Nggo logika lan interaktivitas aplikasi.
 
-##   Penyiapan
+##   Cara Nyiyapné
 
-1.  **Kloning Repositori:**
+1.  **Nglonè Repositori:**
 
     ```bash
     git clone [repository_url]
     cd [repository_name]
     ```
 
-2.  **Siapkan Berkas Font:**
+2.  **Nyiyapné File Font:**
 
-    * Pastikan Anda memiliki direktori bernama `fonts/` di akar proyek.
-    * Letakkan berkas font SVG Anda di direktori `fonts/`.
-    * Buat berkas `list.json` di direktori `fonts/`. Berkas ini harus berisi array JSON dari nama berkas font SVG (misalnya, `["arial.svg", "myfont.svg"]`). Jika berkas ini hilang atau tidak valid, aplikasi mungkin tidak memuat font dengan benar.
-    * Sertakan `bg.hdr` (peta lingkungan HDRI) di direktori `fonts/`.
+    * Pastèkné kowé nduwé direktori jenengé `fonts/` neng akar proyèk.
+    * Ngonokké file font SVG duwèkmèdèwé neng direktori `fonts/`.
+    * Nggawe file `list.json` neng direktori `fonts/`. File iki kudu isiné array JSON saka jeneng file font SVG (umpamané, `["arial.svg", "myfont.svg"]`). Nek file iki ilang utawa ora valid, aplikasi iki mungkin ora isa ngunggah font kanthi bener.
+    * Lebokké `bg.hdr` (peta lingkungan HDRI) neng direktori `fonts/`.
 
-3.  **Jalankan Server Lokal:**
+3.  **Njalanké Sèrver Lokal:**
 
-    * Karena batasan keamanan peramban (CORS), memuat berkas lokal (terutama font dan peta lingkungan HDRI) mungkin memerlukan menjalankan aplikasi dari server web lokal.
-    * Anda dapat menggunakan server HTTP bawaan Python. Buka terminal, arahkan ke direktori proyek Anda, dan jalankan:
+    * Merga watesan keamanan browser (CORS), ngunggah file lokal (utamane font lan peta lingkungan HDRI) mungkin butuh njalanké aplikasi saka sèrver web lokal.
+    * Kowé isa nganggo sèrver HTTP bawaanè Python. Bukak tèrminal, lunga neng direktori proyèkmu, terus jalanaké:
 
         ```bash
         python -m http.server
         ```
 
-    * Kemudian, buka peramban web Anda dan kunjungi `http://localhost:8000` (atau alamat dan port yang ditampilkan di terminal).
+    * Terus, bukak browser webmu lan kunjungi `http://localhost:8000` (utawa alamat lan port sing ditampilné neng tèrminal).
 
-4.  **Buka `index.html`:**
+4.  **Mbukak `index.html`:**
 
-    * Setelah server lokal berjalan, buka `index.html` di peramban web Anda.
+    * Sakwisé sèrver lokal mlaku, bukak `index.html` neng browser webmu.
 
-##   Penggunaan
+##   Cara Nganggoné
 
-1.  **Pilih font:** Pilih font SVG dari menu dropdown atau unggah berkas SVG Anda sendiri.
-2.  **Masukkan teks:** Ketik teks yang diinginkan ke dalam bidang input di bagian bawah.
-3.  **Klik "RENDER":** Hasilkan teks 3D.
-4.  **Sesuaikan material:** Pilih preset material dari dropdown.
-5.  **Berinteraksi dengan scene:**
+1.  **Milih font:** Milih font SVG saka menu dropdown utawa ngunggah file SVG duwèkmèdèwé.
+2.  **Nglebokké tèks:** Ngetik tèks sing dikarepké neng kolom input neng ngisor.
+3.  **Ngeklik "RENDER":** Nggawe tèks 3D.
+4.  **Ngatur matèrial:** Milih prèset matèrial saka dropdown.
+5.  **Interaksi karo scènè:**
 
-    * Klik pada objek teks untuk memilihnya. Kotak kuning akan muncul di sekitarnya.
-    * Seret objek yang dipilih untuk memindahkannya.
-    * Klik pada ruang kosong untuk membatalkan pilihan.
-    * Gunakan kontrol orbit untuk memutar dan memperbesar tampilan.
+    * Ngeklik objèk tèks nggo milih. Kothak kuning bakal muncul neng sakiteré.
+    * Nyèrèt objèk sing dipilih nggo mindahné.
+    * Ngeklik ruang kosong nggo mbatalné pilihan.
+    * Nganggo kontrol orbit nggo muter lan nggedhèkné tampilan.
 
-6.  **Simpan/Muat scene:** Gunakan tombol "Save Scene" dan "Load Scene" untuk menyimpan dan memulihkan pekerjaan Anda.
-7.  **Alihkan Kontrol:** Gunakan tombol "Toggle Controls" untuk menampilkan/menyembunyikan panel kontrol.
+6.  **Nyimpen/Ngunggah scènè:** Nganggo tombol "Save Scene" lan "Load Scene" nggo nyimpen lan mulihné gawéanmu.
+7.  **Ngganti Kontrol:** Nganggo tombol "Toggle Controls" nggo nuduhné/ngumpètné panel kontrol.
 
-##   Catatan Penting
+##   Cathetan Penting
 
-* **Berkas Font:** Aplikasi mengharapkan berkas font SVG dalam format tertentu yang dapat diurai oleh `SVGLoader` Three.js. Pastikan berkas SVG Anda kompatibel.
-* **`list.json`:** Mempertahankan `list.json` yang akurat di direktori `fonts/` sangat penting agar dropdown pemilihan font berfungsi dengan benar.
-* **Server Lokal:** Karena batasan keamanan peramban (CORS), memuat berkas lokal (terutama font dan peta lingkungan HDRI) mungkin memerlukan menjalankan aplikasi dari server web lokal.  `python -m http.server` adalah salah satu cara untuk melakukannya.
-* **HDRI:** Berkas `bg.hdr` digunakan untuk pencahayaan lingkungan. Jika hilang, pantulan mungkin tampak dasar.
+* **File Font:** Aplikasi iki ngarepné file font SVG ing format tartamtu sing isa diurai karo `SVGLoader` Three.js. Pastèkné file SVG duwèkmèdèwé kompatibel.
+* **`list.json`:** Njaga `list.json` sing akurat neng direktori `fonts/` kuwi penting banget nggo dropdown pilihan font isa mlaku kanthi bener.
+* **Sèrver Lokal:** Merga watesan keamanan browser (CORS), ngunggah file lokal (utamane font lan peta lingkungan HDRI) mungkin butuh njalanké aplikasi saka sèrver web lokal. `python -m http.server` kuwi salah sijiné cara nggo nglakoni kuwi.
+* **HDRI:** File `bg.hdr` dienggo nggo cahya lingkungan. Nek ilang, pantulan mungkin katoné sèdèrhana.
 
-##   Kredit
+##   Krèdit
 
-* yosepsoe 2025 ()
+* yosepsoe 2025 (may)
 * Kontributor Three.js
 
-##   Lisensi
+##   Lisènsi
 
-[Tentukan lisensi Anda di sini]
+[Sebutné lisènsimu neng kéné]
