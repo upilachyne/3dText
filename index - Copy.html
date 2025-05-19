@@ -9,7 +9,7 @@
         #container { width: 100vw; height: 100vh; display: block; cursor: default; }
         #controlsPanel {
             position: absolute;
-            top: 10px;
+            top: 50px;
             left: 10px;
             padding: 10px;
             background: rgba(0,0,0,0.75);
@@ -17,7 +17,7 @@
             border-radius: 5px;
             z-index: 100;
             max-width: 320px;
-            max-height: calc(100vh - 80px); /* Adjusted for text input */
+            max-height: calc(100vh - 120px);
             overflow-y: auto;
         }
         label { margin-right: 5px; display: inline-block; min-width: 100px; font-size: 0.9em;}
@@ -76,10 +76,23 @@
         #generateTextButton:hover {
             background-color: #0056b3;
         }
+        #toggleControlsButton {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 101;
+            padding: 8px 10px;
+            font-size: 0.8em;
+        }
+        /* Style for the new Load Scene button */
+        #loadSceneButton {
+            width: 100px; /* Same as save button */
+            margin-right: 10px; /* Same as save button if it had a neighbor */
+        }
     </style>
 </head>
 <body>
-
+    <button id="toggleControlsButton">Toggle Controls</button>
     <div id="controlsPanel">
         <h4>Font Source</h4>
         <div class="input-group">
@@ -89,20 +102,6 @@
         <div class="input-group">
             <label for="svgFile">Or Import:</label>
             <input type="file" id="svgFile" accept=".svg">
-        </div>
-        <hr>
-        <h4>Extrude Settings</h4>
-        <div class="input-group">
-            <label for="extrudeDepth">Extrude Depth:</label>
-            <input type="number" id="extrudeDepth" value="10" min="1" step="1">
-        </div>
-        <div class="input-group">
-            <label for="bevelThickness">Bevel Thick:</label>
-            <input type="number" id="bevelThickness" value="1" min="0" step="0.1">
-        </div>
-        <div class="input-group">
-            <label for="bevelSize">Bevel Size:</label>
-            <input type="number" id="bevelSize" value="0.5" min="0" step="0.1">
         </div>
         <hr>
         <h4>Material</h4>
@@ -121,11 +120,12 @@
             <button id="saveSceneButton" style="width: 100px; margin-right: 10px;">Save Scene</button>
         </div>
         <div class="input-group">
-            <label for="loadSceneFile">Load Scene:</label>
-            <input type="file" id="loadSceneFile" accept=".json">
+            <button id="loadSceneButton">Load Scene</button>
+            <input type="file" id="loadSceneFile" accept=".json" style="display: none;">
         </div>
         <hr>
          <small>Click object to select. Drag empty space (if object selected) to move. Click empty space to deselect.</small>
+         <small style="display: block; margin-top: 5px;">yosepsoe 2025</small> <!-- Added the credit text -->
     </div>
 
     <div id="container"></div>
@@ -138,6 +138,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/SVGLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
+
 
     <script>
         let scene, camera, renderer, orbitControls;
@@ -146,6 +148,7 @@
         let mouse;
 
         let selectedObject = null;
+        let selectionBoxHelper = null;
         let isDragging = false;
         const dragPlane = new THREE.Plane();
         const dragOffset = new THREE.Vector3();
@@ -160,16 +163,20 @@
         let undoHistory = [];
         const MAX_UNDO_STEPS = 20;
 
-        const extrudeDepthInput = document.getElementById('extrudeDepth');
-        const bevelThicknessInput = document.getElementById('bevelThickness');
-        const bevelSizeInput = document.getElementById('bevelSize');
-        const materialSelect = document.getElementById('materialSelect'); // New
+        const materialSelect = document.getElementById('materialSelect');
 
         const customTextInput = document.getElementById('customText');
         const generateTextButton = document.getElementById('generateTextButton');
         const saveSceneButton = document.getElementById('saveSceneButton');
         const loadSceneFileInput = document.getElementById('loadSceneFile');
+        const loadSceneButton = document.getElementById('loadSceneButton'); // New button
         const svgFontSelect = document.getElementById('svgFontSelect');
+        const toggleControlsButton = document.getElementById('toggleControlsButton');
+        const controlsPanel = document.getElementById('controlsPanel');
+
+        const rgbeLoader = new THREE.RGBELoader();
+        const DEFAULT_HDRI_FILENAME = "bg.hdr";
+
 
         let originalSvgDataPaths = null;
         let currentSVGFileName = null;
@@ -178,30 +185,19 @@
         let fontMetrics = { baselineY_SVG: 0 };
 
         const FONT_BASE_URL = "./fonts/";
-        let currentDefaultMaterialType = "svgColor"; // New: To store the selected material type
+        let currentDefaultMaterialType = "svgColor";
 
-        // --- Material Presets ---
         const MATERIAL_PRESETS = {
-            svgColor: { // Will use SVG fill or fallback grey
-                metalness: 0.3,
-                roughness: 0.6
-            },
-            yellowGold: {
-                color: 0xB08D57, // Approx
-                metalness: 0.85,
-                roughness: 0.25
-            },
-            roseGold: {
-                color: 0xB76E79, // Approx
-                metalness: 0.85,
-                roughness: 0.3
-            },
-            whiteGold: { // More like silver/platinum
-                color: 0xD9D9D9, // Approx
-                metalness: 0.9,
-                roughness: 0.2
-            }
+            svgColor: { metalness: 0.2, roughness: 0.7 },
+            yellowGold: { color: 0xB08D57, metalness: 0.8, roughness: 0.25 },
+            roseGold: { color: 0xB76E79, metalness: 0.8, roughness: 0.3 },
+            whiteGold: { color: 0xD9D9D9, metalness: 0.9, roughness: 0.2 }
         };
+        
+        const DEFAULT_EXTRUDE_DEPTH = 10;
+        const DEFAULT_BEVEL_THICKNESS = 1;
+        const DEFAULT_BEVEL_SIZE = 0.5;
+
 
         init();
 
@@ -216,14 +212,17 @@
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0;
+            renderer.outputEncoding = THREE.sRGBEncoding;
             document.getElementById('container').appendChild(renderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
             scene.add(ambientLight);
-            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.9);
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.5);
             directionalLight1.position.set(15, 30, 25);
             scene.add(directionalLight1);
-            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
             directionalLight2.position.set(-15, 20, -15);
             scene.add(directionalLight2);
 
@@ -242,10 +241,7 @@
             renderer.domElement.addEventListener('pointerup', onDocumentPointerUp, false);
             window.addEventListener('keydown', handleKeyDown);
 
-            [extrudeDepthInput, bevelThicknessInput, bevelSizeInput].forEach(input => {
-                input.addEventListener('change', handleExtrudeParamsChange);
-            });
-            materialSelect.addEventListener('change', handleMaterialChange); // New
+            materialSelect.addEventListener('change', handleMaterialChange);
 
             generateTextButton.addEventListener('click', processTextAndGenerate3D);
             customTextInput.addEventListener('keypress', function(event) {
@@ -256,7 +252,17 @@
 
             saveSceneButton.addEventListener('click', saveScene);
             loadSceneFileInput.addEventListener('change', handleLoadSceneFile, false);
+            loadSceneButton.addEventListener('click', () => { // Listener for the new button
+                loadSceneFileInput.click();
+            });
             svgFontSelect.addEventListener('change', handleFontSelectChange);
+            
+            toggleControlsButton.addEventListener('click', () => {
+                controlsPanel.style.display = controlsPanel.style.display === 'none' ? 'block' : 'none';
+            });
+
+
+            loadHdri(FONT_BASE_URL + DEFAULT_HDRI_FILENAME);
 
             await populateFontDropdown();
             const initialFontFile = svgFontSelect.value || "arial.svg";
@@ -264,29 +270,25 @@
                  await loadSVGFromURL(FONT_BASE_URL + initialFontFile, initialFontFile);
             } else {
                 console.warn("No initial font could be determined from dropdown or fallback.");
-                alert("No initial font found. Please check your 'fonts/list.json' and ensure 'arial.svg' or other fonts are available.");
+                alert("No initial font found. Please check your 'fonts/list.json', 'arial.svg', and 'bg.hdr'.");
             }
             animate();
         }
 
-        // --- New Material Handling Functions ---
-        function createMaterial(materialType, svgFillColorHex = 0x808080) { // Default fallback grey
+        function createMaterial(materialType, svgFillColorHex = 0x808080) {
             const preset = MATERIAL_PRESETS[materialType];
             if (!preset) {
                 console.warn(`Material type "${materialType}" not found. Using default.`);
                 return new THREE.MeshStandardMaterial({
-                    color: svgFillColorHex, // Use SVG color or fallback grey for unknown type
-                    metalness: 0.3,
-                    roughness: 0.6,
+                    color: svgFillColorHex,
+                    metalness: 0.2, roughness: 0.7,
                     side: THREE.DoubleSide
                 });
             }
-
-            let finalColor = svgFillColorHex; // For 'svgColor' type, this is the primary color
+            let finalColor = svgFillColorHex;
             if (materialType !== 'svgColor' && preset.color !== undefined) {
-                finalColor = preset.color; // For gold types, use preset color
+                finalColor = preset.color;
             }
-
             return new THREE.MeshStandardMaterial({
                 color: finalColor,
                 metalness: preset.metalness,
@@ -294,34 +296,48 @@
                 side: THREE.DoubleSide
             });
         }
-
         function applyMaterialToObjectGroup(objectGroup, newMaterialType) {
             if (!objectGroup || !objectGroup.children) return;
-
             objectGroup.userData.materialType = newMaterialType;
-
             objectGroup.children.forEach(mesh => {
                 if (mesh.isMesh) {
-                    const originalSvgFill = mesh.userData.originalSvgFillColor !== undefined ? mesh.userData.originalSvgFillColor : 0x808080; // Fallback grey
+                    const originalSvgFill = mesh.userData.originalSvgFillColor !== undefined ? mesh.userData.originalSvgFillColor : 0x808080;
                     const newMaterial = createMaterial(newMaterialType, originalSvgFill);
-                    if (mesh.material) {
-                        mesh.material.dispose();
-                    }
+                    if (mesh.material) mesh.material.dispose();
                     mesh.material = newMaterial;
                 }
             });
         }
-
         function handleMaterialChange() {
             currentDefaultMaterialType = materialSelect.value;
-            if (selectedObject) {
-                // Add undo state for material change? Could be complex if storing full material.
-                // For now, just apply. User can undo position then re-apply material if needed.
-                applyMaterialToObjectGroup(selectedObject, currentDefaultMaterialType);
-            }
-            // If no object is selected, this new material type will be used for the next generated text.
+            loadedObjectGroups.forEach(group => {
+                applyMaterialToObjectGroup(group, currentDefaultMaterialType);
+            });
         }
-        // --- End New Material Handling Functions ---
+
+        function loadHdri(url) {
+            rgbeLoader.load(url, (texture) => {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                scene.environment = texture;
+                console.log(`Default HDRI "${DEFAULT_HDRI_FILENAME}" loaded for environment from:`, url);
+            }, undefined, (error) => {
+                console.warn(`Default HDRI "${DEFAULT_HDRI_FILENAME}" failed to load from "${url}". Reflections might be basic. Error:`, error);
+                scene.environment = null;
+            });
+        }
+
+        function updateSelectionBoxHelper() {
+            if (selectionBoxHelper) {
+                scene.remove(selectionBoxHelper);
+                selectionBoxHelper.geometry.dispose();
+                selectionBoxHelper.material.dispose();
+                selectionBoxHelper = null;
+            }
+            if (selectedObject) {
+                selectionBoxHelper = new THREE.BoxHelper(selectedObject, 0xffff00);
+                scene.add(selectionBoxHelper);
+            }
+        }
 
 
         async function populateFontDropdown() {
@@ -363,11 +379,19 @@
             const selectedFontName = svgFontSelect.value;
             if (selectedFontName) {
                 const fontURL = FONT_BASE_URL + selectedFontName;
-                await loadSVGFromURL(fontURL, selectedFontName);
+                await loadSVGFromURL(fontURL, selectedFontName, true);
             }
         }
 
-        async function loadSVGFromURL(url, svgFileNameForDisplay) {
+        async function loadSVGFromURL(url, svgFileNameForDisplay, isFontChange = false) {
+            let previousObjectStates = [];
+            if (isFontChange && loadedObjectGroups.length > 0) {
+                previousObjectStates = loadedObjectGroups.map(group => ({
+                    name: group.name,
+                    position: group.position.clone()
+                }));
+            }
+
             try {
                 const response = await fetch(url);
                 if (!response.ok) {
@@ -375,6 +399,22 @@
                 }
                 const svgTextData = await response.text();
                 processSVGData(svgTextData, svgFileNameForDisplay);
+
+                if (isFontChange && customTextInput.value.trim() && originalSvgDataPaths) {
+                    processTextAndGenerate3D();
+
+                    if (previousObjectStates.length > 0 && loadedObjectGroups.length > 0) {
+                        loadedObjectGroups.forEach(newGroup => {
+                            const oldState = previousObjectStates.find(state => state.name === newGroup.name);
+                            if (oldState) {
+                                newGroup.position.copy(oldState.position);
+                            }
+                        });
+                        if(selectedObject) updateSelectionBoxHelper();
+                    }
+                }
+
+
             } catch (error) {
                 alert(`Error loading SVG font "${svgFileNameForDisplay}" from URL: ${error.message}\nMake sure the file exists at ${url} and the server is running if using a local server.`);
                 console.error("Error in loadSVGFromURL:", error);
@@ -474,13 +514,14 @@
                     console.warn("Could not determine valid SVG cap height. Using global scale factor 1.");
                 }
 
+
                 clearCurrent3DObjects();
                 clearUndoHistory();
-                customTextInput.value = "";
 
                 if (svgFontSelect.value !== svgFileNameForDisplay) {
                     svgFontSelect.value = svgFileNameForDisplay;
                 }
+                console.log(`SVG font "${svgFileNameForDisplay}" processed.`);
 
             } catch (error) {
                 alert(`Error parsing SVG data for "${svgFileNameForDisplay}": ${error.message}`);
@@ -490,13 +531,7 @@
                 clearCurrent3DObjects();
             }
         }
-
-        function handleExtrudeParamsChange() {
-            if (originalSvgDataPaths && customTextInput.value) {
-                processTextAndGenerate3D();
-            }
-        }
-
+        
         function processTextAndGenerate3D() {
             const inputText = customTextInput.value;
             if (!originalSvgDataPaths) {
@@ -509,10 +544,10 @@
             }
             generate3DModelsFromText(inputText, originalSvgDataPaths);
         }
-
         function clearCurrent3DObjects() {
             if (selectedObject) {
                 selectedObject = null;
+                updateSelectionBoxHelper();
             }
             isDragging = false;
             orbitControls.enabled = true;
@@ -531,7 +566,6 @@
             });
             loadedObjectGroups = [];
         }
-
         function getAlphabetPathIndex(char) {
             if (char >= 'A' && char <= 'Z') {
                 return char.charCodeAt(0) - 'A'.charCodeAt(0);
@@ -540,23 +574,21 @@
             }
             return -1;
         }
-
         function generate3DModelsFromText(inputText, allPathsData) {
-            clearCurrent3DObjects();
+             clearCurrent3DObjects();
 
-            const useBevels = (parseFloat(bevelThicknessInput.value) > 0 && parseFloat(bevelSizeInput.value) > 0);
+            const useBevels = (DEFAULT_BEVEL_THICKNESS > 0 && DEFAULT_BEVEL_SIZE > 0);
             const extrudeSettings = {
-                depth: parseFloat(extrudeDepthInput.value) || 10,
+                depth: DEFAULT_EXTRUDE_DEPTH,
                 bevelEnabled: useBevels,
-                bevelThickness: parseFloat(bevelThicknessInput.value) || 1,
-                bevelSize: parseFloat(bevelSizeInput.value) || 0.5,
+                bevelThickness: DEFAULT_BEVEL_THICKNESS,
+                bevelSize: DEFAULT_BEVEL_SIZE,
                 bevelOffset: 0,
                 bevelSegments: 3
             };
 
             let charDisplayIndex = 0;
             const tempLayoutData = [];
-            currentDefaultMaterialType = materialSelect.value; // Ensure we use the current dropdown value
 
             for (let i = 0; i < inputText.length; i++) {
                 const char = inputText[i];
@@ -570,7 +602,7 @@
                     }
                     const elementGroup = new THREE.Group();
                     elementGroup.name = `Char_${char}_${charDisplayIndex++}`;
-                    elementGroup.userData.materialType = currentDefaultMaterialType; // Store material type on group
+                    elementGroup.userData.materialType = currentDefaultMaterialType;
 
                     const shapes = THREE.SVGLoader.createShapes(pathData);
                     if (shapes.length === 0) {
@@ -585,7 +617,7 @@
                         const offsetX = -(geometry.boundingBox.max.x + geometry.boundingBox.min.x) / 2;
                         geometry.translate(offsetX, -fontMetrics.baselineY_SVG, 0);
 
-                        let svgFillColorHex = 0x808080; // Default grey
+                        let svgFillColorHex = 0x808080;
                          if (pathData.userData && pathData.userData.style &&
                             pathData.userData.style.fill && pathData.userData.style.fill !== 'none' && pathData.userData.style.fill !== 'transparent') {
                             try {
@@ -595,7 +627,7 @@
 
                         const material = createMaterial(currentDefaultMaterialType, svgFillColorHex);
                         const mesh = new THREE.Mesh(geometry, material);
-                        mesh.userData.originalSvgFillColor = svgFillColorHex; // Store for later changes
+                        mesh.userData.originalSvgFillColor = svgFillColorHex;
                         elementGroup.add(mesh);
                     });
 
@@ -668,8 +700,6 @@
             }
             orbitControls.update();
         }
-
-
         function addUndoState(object, position) {
             if (!object) return;
             if (undoHistory.length >= MAX_UNDO_STEPS) {
@@ -677,11 +707,9 @@
             }
             undoHistory.push({ object: object, position: position.clone() });
         }
-
         function clearUndoHistory() {
             undoHistory = [];
         }
-
         function handleKeyDown(event) {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
                 event.preventDefault();
@@ -692,10 +720,11 @@
                         if (stillInScene) {
                             lastState.object.position.copy(lastState.position);
                             selectedObject = lastState.object;
-                            // Restore material selection if object is selected
+                            updateSelectionBoxHelper();
+                            if (selectionBoxHelper) selectionBoxHelper.update();
+
                             if (selectedObject.userData.materialType) {
                                 materialSelect.value = selectedObject.userData.materialType;
-                                currentDefaultMaterialType = selectedObject.userData.materialType;
                             }
                         } else {
                              if(undoHistory.length > 0) handleKeyDown(event);
@@ -705,22 +734,42 @@
             }
         }
 
-        function handleFileSelect(event) {
+        async function handleFileSelect(event) {
             const file = event.target.files[0];
             if (file && file.type === "image/svg+xml") {
-                const reader = new FileReader();
-                reader.onload = function (e) {
-                    processSVGData(e.target.result, file.name);
-                };
-                reader.readAsText(file);
+                let previousObjectStates = [];
+                if (loadedObjectGroups.length > 0) {
+                    previousObjectStates = loadedObjectGroups.map(group => ({
+                        name: group.name,
+                        position: group.position.clone()
+                    }));
+                }
+                const svgTextData = await file.text();
+                processSVGData(svgTextData, file.name);
+
+                if (customTextInput.value.trim() && originalSvgDataPaths) {
+                    processTextAndGenerate3D();
+
+                    if (previousObjectStates.length > 0 && loadedObjectGroups.length > 0) {
+                        loadedObjectGroups.forEach(newGroup => {
+                            const oldState = previousObjectStates.find(state => state.name === newGroup.name);
+                            if (oldState) {
+                                newGroup.position.copy(oldState.position);
+                            }
+                        });
+                         if(selectedObject) updateSelectionBoxHelper();
+                    }
+                }
+
             } else if (file) {
                 alert("Please select a valid SVG file.");
             }
             document.getElementById('svgFile').value = '';
         }
 
+
         function onDocumentPointerDown(event) {
-            pointerDownPosition.set(event.clientX, event.clientY);
+             pointerDownPosition.set(event.clientX, event.clientY);
             isDragging = false;
             pointerDownOnSelectedObject = false;
             pointerDownOnEmptySpace = false;
@@ -730,6 +779,7 @@
             raycaster.setFromCamera(mouse, camera);
 
             const intersects = raycaster.intersectObjects(loadedObjectGroups, true);
+            let newSelectedObject = null;
 
             if (intersects.length > 0) {
                 const intersectedMesh = intersects[0].object;
@@ -737,73 +787,71 @@
                 while (hitGroup.parent && !loadedObjectGroups.includes(hitGroup) && hitGroup.parent !== scene) {
                     hitGroup = hitGroup.parent;
                 }
-
                 if (hitGroup && loadedObjectGroups.includes(hitGroup)) {
-                    if (selectedObject !== hitGroup) {
-                        selectedObject = hitGroup;
-                        addUndoState(selectedObject, selectedObject.position);
-                        // Update material dropdown to reflect selected object's material
-                        if (selectedObject.userData.materialType) {
-                           materialSelect.value = selectedObject.userData.materialType;
-                           currentDefaultMaterialType = selectedObject.userData.materialType;
-                        } else { // Fallback if not set (should be set by generator)
-                           materialSelect.value = "svgColor";
-                           currentDefaultMaterialType = "svgColor";
-                        }
-                    }
-                    pointerDownOnSelectedObject = true;
-                    orbitControls.enabled = false;
-                    dragPlane.setFromNormalAndCoplanarPoint(Z_AXIS, selectedObject.position);
-                    if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
-                        dragOffset.copy(selectedObject.position).sub(dragIntersection);
-                    }
+                    newSelectedObject = hitGroup;
                 }
-            } else {
-                pointerDownOnEmptySpace = true;
+            }
+
+            if (selectedObject !== newSelectedObject) {
+                selectedObject = newSelectedObject;
+                updateSelectionBoxHelper();
                 if (selectedObject) {
-                    orbitControls.enabled = false;
-                    dragPlane.setFromNormalAndCoplanarPoint(Z_AXIS, selectedObject.position);
-                     if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
-                        dragOffset.copy(selectedObject.position).sub(dragIntersection);
+                    addUndoState(selectedObject, selectedObject.position);
+                    if (selectedObject.userData.materialType) {
+                       materialSelect.value = selectedObject.userData.materialType;
                     }
                 }
             }
-        }
 
+
+            if (selectedObject) {
+                pointerDownOnSelectedObject = true;
+                orbitControls.enabled = false;
+                dragPlane.setFromNormalAndCoplanarPoint(Z_AXIS, selectedObject.position);
+                if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                    dragOffset.copy(selectedObject.position).sub(dragIntersection);
+                }
+            } else {
+                pointerDownOnEmptySpace = true;
+            }
+        }
         function onDocumentPointerMove(event) {
             if (!selectedObject || (!pointerDownOnSelectedObject && !pointerDownOnEmptySpace)) {
                 return;
             }
-            if (orbitControls.enabled) return;
+            if (orbitControls.enabled && !(pointerDownOnEmptySpace && selectedObject)) return;
 
-            const currentMousePosition = new THREE.Vector2(event.clientX, event.clientY);
-            const distanceSquared = pointerDownPosition.distanceToSquared(currentMousePosition);
+            if (pointerDownOnSelectedObject || (pointerDownOnEmptySpace && selectedObject)) {
+                 const currentMousePosition = new THREE.Vector2(event.clientX, event.clientY);
+                const distanceSquared = pointerDownPosition.distanceToSquared(currentMousePosition);
 
-            if (!isDragging && distanceSquared > MIN_DRAG_DISTANCE_SQUARED) {
-                isDragging = true;
-                document.getElementById('container').style.cursor = 'grabbing';
-            }
+                if (!isDragging && distanceSquared > MIN_DRAG_DISTANCE_SQUARED) {
+                    isDragging = true;
+                    document.getElementById('container').style.cursor = 'grabbing';
+                    if (pointerDownOnEmptySpace && selectedObject) orbitControls.enabled = false;
+                }
 
-            if (isDragging) {
-                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-                raycaster.setFromCamera(mouse, camera);
+                if (isDragging && selectedObject) {
+                    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                    raycaster.setFromCamera(mouse, camera);
 
-                if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
-                    const newPos = dragIntersection.add(dragOffset);
-                    selectedObject.position.set(newPos.x, newPos.y, selectedObject.position.z);
+                    if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
+                        const newPos = dragIntersection.add(dragOffset);
+                        selectedObject.position.set(newPos.x, newPos.y, selectedObject.position.z);
+                        if (selectionBoxHelper) selectionBoxHelper.update();
+                    }
                 }
             }
         }
-
         function onDocumentPointerUp(event) {
             document.getElementById('container').style.cursor = 'default';
             if (!isDragging) {
-                if (pointerDownOnEmptySpace && selectedObject && !pointerDownOnSelectedObject) {
+                if (pointerDownOnEmptySpace && !selectedObject) {
+                } else if (pointerDownOnEmptySpace && selectedObject && !pointerDownOnSelectedObject) {
                     selectedObject = null;
-                    // When deselecting, material dropdown could revert to global default or last global default
-                    materialSelect.value = "svgColor"; // Or a stored global default if we want that
-                    currentDefaultMaterialType = materialSelect.value;
+                    updateSelectionBoxHelper();
+                    materialSelect.value = currentDefaultMaterialType;
                 }
             }
 
@@ -812,19 +860,16 @@
             pointerDownOnEmptySpace = false;
             orbitControls.enabled = true;
         }
-
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
-
         function animate() {
             requestAnimationFrame(animate);
             orbitControls.update();
             renderer.render(scene, camera);
         }
-
         function sanitizeFileName(name) {
             if (!name || typeof name !== 'string') return "3DTextScene";
             return name.replace(/[^a-z0-9_\-\s\.]/gi, '_').replace(/\s+/g, '_').substring(0, 50) || "3DTextScene";
@@ -841,17 +886,12 @@
             }
 
             const sceneData = {
-                version: "1.1", // Updated version for material info
+                version: "1.4",
                 svgFileName: currentSVGFileName,
                 text: customTextInput.value,
-                extrudeSettings: {
-                    depth: parseFloat(extrudeDepthInput.value),
-                    bevelThickness: parseFloat(bevelThicknessInput.value),
-                    bevelSize: parseFloat(bevelSizeInput.value)
-                },
                 fontMetrics: JSON.parse(JSON.stringify(fontMetrics)),
                 globalUniformScaleFactor: globalUniformScaleFactor,
-                defaultMaterialType: materialSelect.value, // Save current default material
+                defaultMaterialType: materialSelect.value,
                 characters: loadedObjectGroups.map(group => ({
                     name: group.name,
                     position: {
@@ -859,10 +899,9 @@
                         y: group.position.y,
                         z: group.position.z
                     },
-                    materialType: group.userData.materialType || "svgColor" // Save material type for each group
+                    materialType: group.userData.materialType || "svgColor"
                 }))
             };
-
             const defaultFileNameBase = customTextInput.value.trim() ? sanitizeFileName(customTextInput.value) : sanitizeFileName(currentSVGFileName.replace('.svg',''));
             const fileName = prompt("Enter filename for saving:", defaultFileNameBase + ".json");
             if (!fileName) return;
@@ -894,7 +933,7 @@
             } else if (file) {
                 alert("Please select a valid .json scene file.");
             }
-            loadSceneFileInput.value = '';
+            loadSceneFileInput.value = ''; // Reset file input
         }
 
         async function loadSceneData(savedData) {
@@ -902,39 +941,34 @@
                 alert("Invalid or unsupported scene file format.");
                 return;
             }
-             if (savedData.version !== "1.0" && savedData.version !== "1.1") { // Support old and new
-                alert(`Scene file version ${savedData.version} is not supported. This tool supports version 1.0 and 1.1.`);
+            const versionMajor = parseFloat(savedData.version);
+            if (versionMajor < 1.0 || versionMajor > 1.4) {
+                alert(`Scene file version ${savedData.version} is not supported. This tool supports versions 1.0 to 1.4.`);
                 return;
             }
-
             if (savedData.svgFileName) {
                 if (!currentSVGFileName || currentSVGFileName !== savedData.svgFileName) {
                     const confirmLoad = confirm(`This scene requires the SVG font: "${savedData.svgFileName}".\nPress OK to attempt loading it from the local "./fonts/" folder.\nPress Cancel to abort loading the scene.`);
                     if (confirmLoad) {
-                        await loadSVGFromURL(FONT_BASE_URL + savedData.svgFileName, savedData.svgFileName);
+                        await loadSVGFromURL(FONT_BASE_URL + savedData.svgFileName, savedData.svgFileName, loadedObjectGroups.length > 0);
                         if (currentSVGFileName !== savedData.svgFileName) {
                             alert(`Failed to load the required SVG font "${savedData.svgFileName}" from "./fonts/". Scene loading aborted.`);
                             return;
                         }
                     } else {
-                         alert("Scene loading aborted. Please ensure the correct SVG font is available in the './fonts/' folder or select it manually, then try loading the scene file again.");
+                         alert("Scene loading aborted.");
                         return;
                     }
                 }
             } else {
-                alert("Warning: Loaded scene does not specify an SVG font. Results may be incorrect if the current font is not the one used to create the scene.");
+                alert("Warning: Loaded scene does not specify an SVG font.");
             }
 
             clearCurrent3DObjects();
             clearUndoHistory();
 
             customTextInput.value = savedData.text || "";
-            if (savedData.extrudeSettings) {
-                extrudeDepthInput.value = savedData.extrudeSettings.depth || 10;
-                bevelThicknessInput.value = savedData.extrudeSettings.bevelThickness || 1;
-                bevelSizeInput.value = savedData.extrudeSettings.bevelSize || 0.5;
-            }
-            // Set material dropdown from saved scene default or fallback
+            
             currentDefaultMaterialType = savedData.defaultMaterialType || "svgColor";
             materialSelect.value = currentDefaultMaterialType;
 
@@ -947,42 +981,26 @@
             globalUniformScaleFactor = savedData.globalUniformScaleFactor || 1;
 
             if (customTextInput.value.trim() && originalSvgDataPaths) {
-                // Temporarily set materialSelect for generation if version is old
-                let oldMaterialSelectValue;
-                if (savedData.version === "1.0") {
-                    oldMaterialSelectValue = materialSelect.value;
-                    materialSelect.value = "svgColor"; // Old scenes are implicitly svgColor
-                }
-
                 generate3DModelsFromText(customTextInput.value, originalSvgDataPaths);
 
-                if (savedData.version === "1.0" && oldMaterialSelectValue) {
-                    materialSelect.value = oldMaterialSelectValue; // Restore
-                }
-
-
                 if (savedData.characters && savedData.characters.length > 0 && loadedObjectGroups.length > 0) {
-                    savedData.characters.forEach(savedChar => {
+                     savedData.characters.forEach(savedChar => {
                         const targetGroup = loadedObjectGroups.find(group => group.name === savedChar.name);
                         if (targetGroup) {
                             if (savedChar.position) {
                                 targetGroup.position.set(savedChar.position.x, savedChar.position.y, savedChar.position.z);
                             }
-                            // Apply saved material type for version 1.1+
-                            if (savedData.version === "1.1" && savedChar.materialType) {
+                            if (savedChar.materialType) {
                                 applyMaterialToObjectGroup(targetGroup, savedChar.materialType);
-                                targetGroup.userData.materialType = savedChar.materialType;
-                            } else { // For 1.0 or missing materialType, it defaults to svgColor via generate3DModelsFromText
-                                targetGroup.userData.materialType = "svgColor";
                             }
                         }
                     });
                 }
                 alert("Scene loaded successfully.");
             } else if (customTextInput.value.trim() && !originalSvgDataPaths && savedData.svgFileName) {
-                 alert("Scene data restored, but text cannot be rendered because the required SVG font '" + savedData.svgFileName + "' could not be fully processed or is missing from ./fonts/.");
+                 alert("Scene data restored, but text cannot be rendered because the required SVG font could not be processed.");
             } else if (!customTextInput.value.trim()){
-                alert("Scene settings (font, extrude params, material) loaded. No text to render.");
+                alert("Scene settings loaded. No text to render.");
             }
 
             orbitControls.target.set(0, desiredCharHeight / 2, 0);
