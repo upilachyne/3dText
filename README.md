@@ -112,6 +112,7 @@ Proyek ini adalah alat berbasis web yang memungkinkan pengguna untuk menghasilka
 
 ## Catatan Penting
 
+* **RUN:** python -m http.server
 * **Berkas Font:** Aplikasi mengharapkan berkas font SVG dalam format tertentu yang dapat diurai oleh `SVGLoader` Three.js. Pastikan berkas SVG Anda kompatibel.
 * **`list.json`:** Mempertahankan `list.json` yang akurat di direktori `fonts/` sangat penting agar dropdown pemilihan font berfungsi dengan benar.
 * **Server Lokal:** Karena batasan keamanan peramban (CORS), memuat berkas lokal (terutama font dan peta lingkungan HDRI) mungkin memerlukan menjalankan aplikasi dari server web lokal (misalnya, menggunakan `http.server` Python atau `http-server` Node.js).
